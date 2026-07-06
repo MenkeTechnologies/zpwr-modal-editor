@@ -1,0 +1,22 @@
+{
+  "name": "zpwr-modal-editor",
+  "version": "0.1.0",
+  "description": "Shared modal-editing (Vim / Emacs) editor for the MenkeTechnologies GUI apps. Vim/Emacs engines vendored from monaco-vim / monaco-emacs and adapted behind a surface adapter so the editor can drop into any app (word/ppt/etc.). esbuild-bundled to a vendored IIFE (window.ZModal).",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "node scripts/build-modal-editor.mjs"
+  },
+  "peerDependencies": {
+    "monaco-editor": "0.55.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MenkeTechnologies/zpwr-modal-editor.git"
+  },
+  "homepage": "https://github.com/MenkeTechnologies/zpwr-modal-editor",
+  "author": "MenkeTechnologies <linux.dev25@gmail.com>",
+  "license": "MIT"
+}
