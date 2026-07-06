@@ -1,3 +1,6 @@
 node_modules/
 dist/
 pnpm-lock.yaml
+
+# docs/ is the published HUD site — override the global docs/ ignore
+!docs/
