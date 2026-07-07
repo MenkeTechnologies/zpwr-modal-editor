@@ -21,8 +21,12 @@ const src = join(here, '..', 'src');
 const consumer = process.cwd();
 const lib = process.env.MODAL_EDITOR_OUT || join(consumer, 'frontend', 'lib');
 
+// DOM-only build: emit just the Monaco-free contenteditable bundle (word/ppt/cell surfaces
+// that already load another Monaco — e.g. zoffice's hooks editor — can't add a second one).
+const domOnly = process.env.MODAL_EDITOR_DOM_ONLY === '1';
+
 const monacoDir = join(consumer, 'node_modules', 'monaco-editor');
-if (!existsSync(monacoDir)) {
+if (!domOnly && !existsSync(monacoDir)) {
   throw new Error(
     `monaco-editor not found at ${monacoDir} — run pnpm install in the consumer (it must keep monaco-editor + esbuild devDeps)`,
   );
@@ -57,23 +61,47 @@ const common = {
   sourcemap: false,
   legalComments: 'none',
   loader: { '.ttf': 'dataurl' },
-  plugins: [resolveFix],
 };
 
-// Main editor bundle (emits modal-editor.bundle.js + modal-editor.bundle.css).
-// globalName exposes the module exports as `window.ZModal`.
+// The Vim engine hard-imports `../../adapters/monaco_adapter`. For the DOM build we alias
+// that import to the contenteditable adapter so the vendored 7k-line engine is reused
+// unchanged AND the bundle never pulls in monaco.
+const domAlias = {
+  name: 'vim-dom-adapter-alias',
+  setup(b) {
+    b.onResolve({ filter: /adapters\/monaco_adapter$/ }, () => ({
+      path: join(src, 'adapters', 'dom_adapter.ts'),
+    }));
+  },
+};
+
+if (!domOnly) {
+  // Main (Monaco) editor bundle — modal-editor.bundle.js + .css. Bundles its own Monaco.
+  await build({
+    ...common,
+    plugins: [resolveFix],
+    entryPoints: [join(src, 'index.ts')],
+    outfile: join(lib, 'modal-editor.bundle.js'),
+    globalName: 'ZModal',
+  });
+  // Monaco base web worker.
+  await build({
+    ...common,
+    plugins: [resolveFix],
+    entryPoints: [join(src, 'worker-entry.ts')],
+    outfile: join(lib, 'modal-editor.worker.js'),
+  });
+  console.log(`Wrote ${lib}/modal-editor.bundle.{js,css} + modal-editor.worker.js`);
+}
+
+// DOM (contenteditable) bundle — modal-editor-dom.bundle.js. NO monaco: the vim engine
+// drives the app's WYSIWYG pages directly. globalName also `ZModal` (a consumer loads one
+// or the other, never both).
 await build({
   ...common,
-  entryPoints: [join(src, 'index.ts')],
-  outfile: join(lib, 'modal-editor.bundle.js'),
+  plugins: [domAlias],
+  entryPoints: [join(src, 'index-dom.ts')],
+  outfile: join(lib, 'modal-editor-dom.bundle.js'),
   globalName: 'ZModal',
 });
-
-// Monaco base web worker.
-await build({
-  ...common,
-  entryPoints: [join(src, 'worker-entry.ts')],
-  outfile: join(lib, 'modal-editor.worker.js'),
-});
-
-console.log(`Wrote ${lib}/modal-editor.bundle.{js,css} + modal-editor.worker.js`);
+console.log(`Wrote ${lib}/modal-editor-dom.bundle.js`);
