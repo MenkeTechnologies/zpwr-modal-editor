@@ -963,6 +963,30 @@ class DomAdapter {
   getUserVisibleLines() { return { top: 0, bottom: this.lastLine() }; }
 
   // ---- block cursor overlay -----------------------------------------------
+  // A blinking block cursor, painted over the character at the caret in normal/visual
+  // mode (hidden in insert mode, where the native caret shows). Self-contained: the blink
+  // keyframes + look are injected once so any consuming app gets it without extra CSS.
+  _ensureCursorStyle() {
+    if (document.getElementById("zmodal-cursor-style")) return;
+    const s = document.createElement("style");
+    s.id = "zmodal-cursor-style";
+    // Theme-driven colour: follow the host app's colorscheme via CSS custom properties
+    // (--accent / --accent-glow, re-valued per theme), with --cyan and a hard default as
+    // fallbacks so the shared adapter still shows a cursor in an unthemed app. An app can
+    // force a colour with --zmodal-cursor-color / -fill / -glow.
+    // NB: NO `mix-blend-mode` — screen-blend over the white document canvas resolves to
+    // white (invisible); a translucent fill + solid outline + glow reads on white AND dark.
+    const COLOR = "var(--zmodal-cursor-color,var(--accent,var(--cyan,#00e5ff)))";
+    const FILL = "var(--zmodal-cursor-fill,var(--accent-glow,var(--cyan-glow,rgba(0,229,255,.4))))";
+    const GLOW = "var(--zmodal-cursor-glow,var(--accent-glow,var(--cyan-glow,rgba(0,229,255,.85))))";
+    s.textContent =
+      "@keyframes zmodal-blink{0%,55%{opacity:1}56%,100%{opacity:0}}" +
+      ".zmodal-block-cursor{position:fixed;pointer-events:none;z-index:2147483000;" +
+      "background:" + FILL + ";outline:1.5px solid " + COLOR + ";" +
+      "box-shadow:0 0 6px " + GLOW + ";border-radius:1px;" +
+      "animation:zmodal-blink 1.06s steps(1) infinite}";
+    document.head.appendChild(s);
+  }
   _renderCursor() {
     try {
       if (this.ctxInsert.get()) { if (this._cursorEl) this._cursorEl.style.display = "none"; return; }
@@ -977,19 +1001,23 @@ class DomAdapter {
       else range.setEnd(a.node, a.offset);
       const rect = range.getBoundingClientRect();
       if (!this._cursorEl) {
+        this._ensureCursorStyle();
         this._cursorEl = document.createElement("div");
         this._cursorEl.className = "zmodal-block-cursor";
-        this._cursorEl.style.cssText =
-          "position:fixed;background:rgba(0,229,255,.45);pointer-events:none;z-index:9999;";
         document.body.appendChild(this._cursorEl);
       }
-      const w = rect.width || 8;
+      const w = rect.width || (parseFloat(getComputedStyle(this.host).fontSize) * 0.6) || 8;
       const h = rect.height || 16;
       this._cursorEl.style.display = "block";
       this._cursorEl.style.left = rect.left + "px";
       this._cursorEl.style.top = rect.top + "px";
       this._cursorEl.style.width = w + "px";
       this._cursorEl.style.height = h + "px";
+      // Restart the blink so the cursor is solid immediately after each move (like a
+      // terminal vim), then resumes blinking.
+      this._cursorEl.style.animation = "none";
+      void this._cursorEl.offsetWidth;
+      this._cursorEl.style.animation = "";
     } catch (_) {
       if (this._cursorEl) this._cursorEl.style.display = "none";
     }
