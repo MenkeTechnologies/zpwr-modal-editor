@@ -981,7 +981,10 @@ class DomAdapter {
     const GLOW = "var(--zmodal-cursor-glow,var(--accent-glow,var(--cyan-glow,rgba(0,229,255,.85))))";
     s.textContent =
       "@keyframes zmodal-blink{0%,55%{opacity:1}56%,100%{opacity:0}}" +
-      ".zmodal-block-cursor{position:fixed;pointer-events:none;z-index:2147483000;" +
+      // z-index sits above editor/pane content (the tmux tiling overlay is 8500) but BELOW app
+      // overlays — the ⌘K palette (9998), zgui modals (25000) and toasts (30000) — so a dialog
+      // opened over the editor is never pierced by the blinking block caret.
+      ".zmodal-block-cursor{position:fixed;pointer-events:none;z-index:9000;" +
       "background:" + FILL + ";outline:1.5px solid " + COLOR + ";" +
       "box-shadow:0 0 6px " + GLOW + ";border-radius:1px;" +
       "animation:zmodal-blink 1.06s steps(1) infinite}";
