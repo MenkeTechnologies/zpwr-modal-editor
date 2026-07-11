@@ -1002,7 +1002,17 @@ class DomAdapter {
       range.setStart(a.node, a.offset);
       if (c.ch < line.length) range.setEnd(b.node, b.offset);
       else range.setEnd(a.node, a.offset);
-      const rect = range.getBoundingClientRect();
+      let rect = range.getBoundingClientRect();
+      // Empty line: a collapsed range in an empty block (<p> with just a <br>) has no geometry, so
+      // the block cursor would land at (0,0) / invisible. Fall back to the line element's own box so
+      // the block still shows at the start of the empty line.
+      if (!rect.height) {
+        const el: any = a.node && (a.node as any).nodeType === 1 ? a.node : (a.node as any).parentElement;
+        if (el && el.getBoundingClientRect) {
+          const er = el.getBoundingClientRect();
+          rect = { left: er.left, top: er.top, width: 0, height: er.height } as DOMRect;
+        }
+      }
       if (!this._cursorEl) {
         this._ensureCursorStyle();
         this._cursorEl = document.createElement("div");
