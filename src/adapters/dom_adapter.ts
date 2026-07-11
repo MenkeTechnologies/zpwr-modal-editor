@@ -172,8 +172,15 @@ class DomAdapter {
     this._onSelChange = this._onSelChange.bind(this);
     this._onScroll = this._onScroll.bind(this);
 
+    // Hide the block cursor when the host loses focus (and so also when the host is removed from the
+    // DOM — e.g. a modal editor closes — which fires blur). Otherwise the fixed-position cursor
+    // overlay lingers, floating over the rest of the app. Re-render (show) on focus.
+    (this as any)._onBlur = () => { if (this._cursorEl) (this._cursorEl as HTMLElement).style.display = "none"; };
+    (this as any)._onFocus = () => { try { this._renderCursor(); } catch (_) { /* */ } };
     host.addEventListener("keydown", this._onKeyDown, true);
     host.addEventListener("input", this._onInput);
+    host.addEventListener("blur", (this as any)._onBlur);
+    host.addEventListener("focus", (this as any)._onFocus);
     document.addEventListener("selectionchange", this._onSelChange);
     window.addEventListener("scroll", this._onScroll, true);
   }
@@ -190,6 +197,8 @@ class DomAdapter {
     if (DomAdapter.keyMap.vim) DomAdapter.keyMap.vim.detach(this);
     this.host.removeEventListener("keydown", this._onKeyDown, true);
     this.host.removeEventListener("input", this._onInput);
+    this.host.removeEventListener("blur", (this as any)._onBlur);
+    this.host.removeEventListener("focus", (this as any)._onFocus);
     document.removeEventListener("selectionchange", this._onSelChange);
     window.removeEventListener("scroll", this._onScroll, true);
     this.host.classList.remove("zmodal-normal", "zmodal-visual");
