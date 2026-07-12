@@ -1013,13 +1013,17 @@ class DomAdapter {
       else range.setEnd(a.node, a.offset);
       let rect = range.getBoundingClientRect();
       // Empty line: a collapsed range in an empty block (<p> with just a <br>) has no geometry, so
-      // the block cursor would land at (0,0) / invisible. Fall back to the line element's own box so
-      // the block still shows at the start of the empty line.
+      // the block cursor would land at (0,0) / invisible. Fall back to the line element's TOP/LEFT but
+      // use ONE line-height for the cursor — NOT the element's full height (an empty box is as tall as
+      // the whole textarea, which made the block cursor span the entire field).
       if (!rect.height) {
         const el: any = a.node && (a.node as any).nodeType === 1 ? a.node : (a.node as any).parentElement;
         if (el && el.getBoundingClientRect) {
           const er = el.getBoundingClientRect();
-          rect = { left: er.left, top: er.top, width: 0, height: er.height } as DOMRect;
+          const cs = getComputedStyle(el);
+          const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.3 || 16;
+          const padL = parseFloat(cs.paddingLeft) || 0, padT = parseFloat(cs.paddingTop) || 0;
+          rect = { left: er.left + padL, top: er.top + padT, width: 0, height: lh } as DOMRect;
         }
       }
       if (!this._cursorEl) {
@@ -1028,8 +1032,12 @@ class DomAdapter {
         this._cursorEl.className = "zmodal-block-cursor";
         document.body.appendChild(this._cursorEl);
       }
-      const w = rect.width || (parseFloat(getComputedStyle(this.host).fontSize) * 0.6) || 8;
-      const h = rect.height || 16;
+      const hostCs = getComputedStyle(this.host);
+      const lineH = parseFloat(hostCs.lineHeight) || parseFloat(hostCs.fontSize) * 1.3 || 16;
+      const w = rect.width || (parseFloat(hostCs.fontSize) * 0.6) || 8;
+      // Cap the cursor at ~one line: a degenerate/empty-line rect can report the full field height,
+      // which made the block cursor as tall as the whole textarea.
+      const h = Math.min(rect.height || lineH, lineH * 1.6);
       this._cursorEl.style.display = "block";
       this._cursorEl.style.left = rect.left + "px";
       this._cursorEl.style.top = rect.top + "px";
