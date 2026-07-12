@@ -1,6 +1,6 @@
 {
   "name": "zpwr-modal-editor",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Shared modal-editing (Vim / Emacs) editor for the MenkeTechnologies GUI apps. Vim/Emacs engines vendored from monaco-vim / monaco-emacs and adapted behind a surface adapter so the editor can drop into any app (word/ppt/etc.). esbuild-bundled to a vendored IIFE (window.ZModal).",
   "type": "module",
   "exports": {
