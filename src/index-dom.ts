@@ -8,6 +8,7 @@
 // second Monaco (which would crash WKWebView alongside the hooks editor's Monaco).
 import VimMode from "./engine/vim/keymap_vim"; // → DomAdapter under the DOM build alias
 import StatusBar from "./statusbar";
+import { Completion, CompletionConfig } from "./completion";
 
 /**
  * Attach Vim modal editing to a contenteditable element. If `statusbarNode` is given, the
@@ -44,6 +45,12 @@ export interface DomAttachOptions {
   statusBar?: HTMLElement | null;
   onChange?: (text: string) => void;
   readOnly?: boolean;
+  /**
+   * Insert-mode completion for this field. Alternatively set `host.zmodalCompletion` on the element
+   * (read at query time) — useful when the element is attached by a generic manager that doesn't know
+   * the field's candidate list. See {@link CompletionConfig}.
+   */
+  completion?: CompletionConfig;
 }
 
 export interface DomModalHandle {
@@ -79,6 +86,10 @@ export function attach(host: HTMLElement, opts: DomAttachOptions = {}): DomModal
   };
   if ((opts.mode || "vim") === "vim") engage();
 
+  // Insert-mode completion popup. Reads opts.completion or host.zmodalCompletion; a no-op when neither
+  // is set, so a plain field behaves exactly as before (Tab flows to Vim).
+  const completion = new Completion(host, () => adapter, opts.completion || null);
+
   return {
     get adapter() { return adapter; },
     host,
@@ -86,7 +97,7 @@ export function attach(host: HTMLElement, opts: DomAttachOptions = {}): DomModal
     focus: () => host.focus(),
     setMode: (m) => (m === "vim" ? engage() : disengage()),
     isVim: () => !!adapter,
-    destroy: () => disengage(),
+    destroy: () => { try { completion.dispose(); } catch (_) {} disengage(); },
   };
 }
 
