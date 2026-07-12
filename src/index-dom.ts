@@ -9,6 +9,28 @@
 import VimMode from "./engine/vim/keymap_vim"; // → DomAdapter under the DOM build alias
 import StatusBar from "./statusbar";
 import { Completion, CompletionConfig } from "./completion";
+import {
+  addSnippet,
+  expandBody,
+  loadSnippets,
+  matchSnippets,
+  openManager as openSnippetManager,
+  removeSnippet,
+} from "./snippets";
+
+/**
+ * User snippet engine, exposed on the `ZModal` facade so a host app can open the manager (e.g. from a
+ * toolbar/command) and script the store. Snippets also surface automatically in the insert-mode
+ * completion popup — type a trigger, Tab expands the (dynamic-token-resolved) body. See `snippets.ts`.
+ */
+export const snippets = {
+  list: loadSnippets,
+  add: addSnippet,
+  remove: removeSnippet,
+  expand: expandBody,
+  match: matchSnippets,
+  openManager: openSnippetManager,
+};
 
 /**
  * Attach Vim modal editing to a contenteditable element. If `statusbarNode` is given, the

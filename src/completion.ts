@@ -11,6 +11,8 @@
 // the generic attach knowing about them. When no source is set the popup never shows and every key
 // (including Tab) flows straight to the Vim engine unchanged.
 
+import { matchSnippets } from "./snippets";
+
 export type CompletionItem = string | { label: string; insert?: string; detail?: string };
 
 export interface CompletionConfig {
@@ -104,7 +106,7 @@ export class Completion {
 
   private currentPrefix(): string | null {
     const a = this.getAdapter();
-    const seps = this.cfg()?.separators || " \t\n,;";
+    const seps = this.cfg()?.separators || " \t\n.,;:!?()[]{}\"'`";
     let before = "";
     if (a && typeof a.getCursor === "function" && typeof a._fullText === "function") {
       const cur = a.getCursor();
@@ -123,19 +125,23 @@ export class Completion {
   private _onInput(): void {
     if (!this.inInsert()) { this.close(); return; }
     const c = this.cfg();
-    if (!c || typeof c.source !== "function") { this.close(); return; }
     const prefix = this.currentPrefix();
     if (prefix == null) { this.close(); return; }
-    const min = c.minChars == null ? 1 : c.minChars;
+    const min = c && c.minChars != null ? c.minChars : 1;
     if (prefix.length < min) { this.close(); return; }
-    let cands: CompletionItem[] | null | undefined = [];
-    try {
-      const a = this.getAdapter();
-      cands = c.source(prefix, a && typeof a._fullText === "function" ? a._fullText() : this.host.innerText);
-    } catch (_) {
-      cands = [];
+    // User snippets are ALWAYS available (any editor); the per-field source, if configured, adds to
+    // them. So the popup shows for a plain editor with snippets even when no field source is set.
+    let cands: CompletionItem[] = matchSnippets(prefix);
+    if (c && typeof c.source === "function") {
+      try {
+        const a = this.getAdapter();
+        const more = c.source(prefix, a && typeof a._fullText === "function" ? a._fullText() : this.host.innerText);
+        if (more && more.length) cands = cands.concat(more);
+      } catch (_) {
+        /* source threw — keep snippet matches */
+      }
     }
-    if (!cands || !cands.length) { this.close(); return; }
+    if (!cands.length) { this.close(); return; }
     const max = c.maxItems || 8;
     this.items = cands.slice(0, max).map((it) =>
       typeof it === "string"
