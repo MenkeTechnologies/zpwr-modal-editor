@@ -30,6 +30,8 @@ interface NormItem {
   label: string;
   insert: string;
   detail?: string;
+  /** When present, the real insert string is produced asynchronously on accept (e.g. a stryke snippet). */
+  resolve?: () => Promise<string>;
 }
 
 const STYLE_ID = "zmodal-completion-style";
@@ -142,11 +144,11 @@ export class Completion {
       }
     }
     if (!cands.length) { this.close(); return; }
-    const max = c.maxItems || 8;
+    const max = (c && c.maxItems) || 8;
     this.items = cands.slice(0, max).map((it) =>
       typeof it === "string"
         ? { label: it, insert: it }
-        : { label: it.label, insert: it.insert != null ? it.insert : it.label, detail: it.detail },
+        : { label: it.label, insert: it.insert != null ? it.insert : it.label, detail: it.detail, resolve: (it as { resolve?: () => Promise<string> }).resolve },
     );
     this.prefixLen = prefix.length;
     this.sel = 0;
@@ -208,26 +210,40 @@ export class Completion {
     this.render();
   }
 
-  private accept(): void {
-    if (!this.open || !this.items.length) return;
-    const it = this.items[this.sel];
+  // Replace the typed prefix with `text` at the current caret.
+  private insertAt(text: string, prefixLen: number): void {
     const a = this.getAdapter();
     if (a && typeof a.replaceRange === "function" && typeof a.getCursor === "function") {
       const cur = a.getCursor();
-      a.replaceRange(it.insert, { line: cur.line, ch: Math.max(0, cur.ch - this.prefixLen) }, cur);
+      a.replaceRange(text, { line: cur.line, ch: Math.max(0, cur.ch - prefixLen) }, cur);
     } else {
       const sel = window.getSelection();
       if (sel && sel.focusNode && sel.rangeCount) {
         const range = sel.getRangeAt(0);
-        range.setStart(sel.focusNode, Math.max(0, sel.focusOffset - this.prefixLen));
+        range.setStart(sel.focusNode, Math.max(0, sel.focusOffset - prefixLen));
         range.deleteContents();
-        range.insertNode(document.createTextNode(it.insert));
+        range.insertNode(document.createTextNode(text));
         range.collapse(false);
         sel.removeAllRanges();
         sel.addRange(range);
       }
     }
+  }
+
+  private accept(): void {
+    if (!this.open || !this.items.length) return;
+    const it = this.items[this.sel];
+    const prefixLen = this.prefixLen;
     this.close();
+    if (it.resolve) {
+      // Async producer (e.g. a stryke snippet): run it, THEN replace the trigger with the output. The
+      // caret hasn't moved (the user pressed Tab and is waiting), so prefixLen still applies on resolve.
+      it.resolve()
+        .then((text) => this.insertAt(text != null ? String(text) : "", prefixLen))
+        .catch(() => {});
+    } else {
+      this.insertAt(it.insert, prefixLen);
+    }
   }
 
   private _onKey(e: KeyboardEvent): void {

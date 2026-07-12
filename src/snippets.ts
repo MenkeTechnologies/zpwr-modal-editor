@@ -9,9 +9,38 @@
 export interface Snippet {
   trigger: string;
   body: string;
+  /** When set, `body` is a stryke script: it is RUN at expansion and its stdout is inserted. */
+  stryke?: boolean;
+}
+
+/** A completion candidate produced from a snippet. Stryke snippets carry an async `resolve`. */
+export interface SnippetMatch {
+  label: string;
+  insert: string;
+  detail: string;
+  resolve?: () => Promise<string>;
 }
 
 const STORE_KEY = "zmodal-snippets";
+
+// The stryke evaluator, published by the host app (e.g. wired to the `run_stryke_hook` Tauri command).
+// Takes a stryke script, returns its generated string (stdout). Absent → stryke snippets insert "".
+let _evaluator: ((code: string) => Promise<string> | string) | null = null;
+
+/** Register how to run a stryke snippet body → its output string. Called once by the host app. */
+export function setEvaluator(fn: ((code: string) => Promise<string> | string) | null): void {
+  _evaluator = typeof fn === "function" ? fn : null;
+}
+
+/** Run a stryke snippet body through the app evaluator; "" if none is registered or it throws. */
+export async function runStryke(code: string): Promise<string> {
+  if (!_evaluator) return "";
+  try {
+    return String((await _evaluator(code)) ?? "");
+  } catch (_) {
+    return "";
+  }
+}
 
 export function loadSnippets(): Snippet[] {
   try {
@@ -36,12 +65,14 @@ export function saveSnippets(list: Snippet[]): void {
   }
 }
 
-/** Add or replace (by trigger) a snippet. */
-export function addSnippet(trigger: string, body: string): void {
+/** Add or replace (by trigger) a snippet. `stryke` marks the body as a stryke script. */
+export function addSnippet(trigger: string, body: string, stryke?: boolean): void {
   const t = String(trigger || "").trim();
   if (!t) return;
   const list = loadSnippets().filter((s) => s.trigger !== t);
-  list.push({ trigger: t, body: String(body == null ? "" : body) });
+  const snip: Snippet = { trigger: t, body: String(body == null ? "" : body) };
+  if (stryke) snip.stryke = true;
+  list.push(snip);
   list.sort((a, b) => a.trigger.localeCompare(b.trigger));
   saveSnippets(list);
 }
@@ -65,7 +96,7 @@ export function expandBody(body: string): string {
  * Completion candidates for `prefix`: snippets whose trigger starts with (then merely contains) it.
  * `insert` is the expanded body; `label` is the trigger, with a short body preview as `detail`.
  */
-export function matchSnippets(prefix: string): Array<{ label: string; insert: string; detail: string }> {
+export function matchSnippets(prefix: string): SnippetMatch[] {
   const low = String(prefix || "").toLowerCase();
   if (!low) return [];
   const pre: Snippet[] = [];
@@ -77,11 +108,14 @@ export function matchSnippets(prefix: string): Array<{ label: string; insert: st
   }
   return pre.concat(sub).slice(0, 8).map((s) => {
     const preview = s.body.replace(/\s+/g, " ").trim();
-    return {
-      label: s.trigger,
-      insert: expandBody(s.body),
-      detail: "⚡ " + (preview.length > 32 ? preview.slice(0, 31) + "…" : preview),
-    };
+    const short = preview.length > 32 ? preview.slice(0, 31) + "…" : preview;
+    if (s.stryke) {
+      // Body is a stryke script: run it AT ACCEPT (not now) and insert its stdout. The popup shows the
+      // trigger with a code preview; the actual string is produced on Tab.
+      const body = s.body;
+      return { label: s.trigger, insert: "", detail: "λ " + short, resolve: () => runStryke(body) };
+    }
+    return { label: s.trigger, insert: expandBody(s.body), detail: "⚡ " + short };
   });
 }
 
@@ -114,6 +148,7 @@ function ensureMgrStyle(): void {
     ".zmodal-snip-input,.zmodal-snip-textarea{background:#05050a;border:1px solid #1a1a3e;border-radius:4px;" +
     "color:#e0f0ff;font-family:inherit;font-size:12px;padding:6px 8px}" +
     ".zmodal-snip-textarea{min-height:64px;resize:vertical}" +
+    ".zmodal-snip-check{display:flex;align-items:center;gap:6px;color:#7a8ba8;font-size:11px;cursor:pointer}" +
     ".zmodal-snip-btn{align-self:flex-start;background:#05d9e8;color:#04121a;border:none;border-radius:4px;" +
     "cursor:pointer;font-family:inherit;font-weight:700;font-size:12px;padding:6px 14px}" +
     ".zmodal-snip-hint{color:#7a8ba8;font-size:11px;line-height:1.5}" +
@@ -155,13 +190,27 @@ export function openManager(): void {
   const bod = document.createElement("textarea");
   bod.className = "zmodal-snip-textarea";
   bod.placeholder = "body — tokens: $DATE $TIME $DATETIME $DATE_ISO $YEAR";
+  const strykeLabel = document.createElement("label");
+  strykeLabel.className = "zmodal-snip-check";
+  const strykeChk = document.createElement("input");
+  strykeChk.type = "checkbox";
+  strykeLabel.appendChild(strykeChk);
+  strykeLabel.appendChild(document.createTextNode(" Run as stryke code (body is a stryke script; its output is inserted)"));
   const add = document.createElement("button");
   add.className = "zmodal-snip-btn";
   add.textContent = "Add / Update";
   form.appendChild(trg);
   form.appendChild(bod);
+  form.appendChild(strykeLabel);
   form.appendChild(add);
   box.appendChild(form);
+  // Reflect stryke mode on the body placeholder as a hint.
+  const syncPh = () => {
+    bod.placeholder = strykeChk.checked
+      ? "stryke script — its stdout is inserted (e.g.  p @date.fmt(\"%A\")  )"
+      : "body — tokens: $DATE $TIME $DATETIME $DATE_ISO $YEAR";
+  };
+  strykeChk.addEventListener("change", syncPh);
 
   const hint = document.createElement("div");
   hint.className = "zmodal-snip-hint";
@@ -184,11 +233,13 @@ export function openManager(): void {
       row.className = "zmodal-snip-row";
       const nm = document.createElement("span");
       nm.className = "zmodal-snip-trg";
-      nm.textContent = s.trigger;
-      nm.title = "Click to edit";
+      nm.textContent = (s.stryke ? "λ " : "") + s.trigger;
+      nm.title = s.stryke ? "stryke snippet · click to edit" : "Click to edit";
       nm.addEventListener("click", () => {
         trg.value = s.trigger;
         bod.value = s.body;
+        strykeChk.checked = !!s.stryke;
+        syncPh();
         bod.focus();
       });
       const bd = document.createElement("span");
@@ -225,9 +276,11 @@ export function openManager(): void {
       trg.focus();
       return;
     }
-    addSnippet(trg.value, bod.value);
+    addSnippet(trg.value, bod.value, strykeChk.checked);
     trg.value = "";
     bod.value = "";
+    strykeChk.checked = false;
+    syncPh();
     trg.focus();
     refresh();
   });

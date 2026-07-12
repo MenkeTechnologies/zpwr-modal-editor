@@ -16,6 +16,8 @@ import {
   matchSnippets,
   openManager as openSnippetManager,
   removeSnippet,
+  runStryke,
+  setEvaluator,
 } from "./snippets";
 
 /**
@@ -30,6 +32,10 @@ export const snippets = {
   expand: expandBody,
   match: matchSnippets,
   openManager: openSnippetManager,
+  // Wire the stryke runtime: `fn(code)` runs a stryke script and returns its output string. Once set,
+  // a snippet marked "stryke" runs its body on expansion and inserts the result.
+  setEvaluator,
+  runStryke,
 };
 
 /**
