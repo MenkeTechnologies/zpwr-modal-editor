@@ -87,12 +87,41 @@ function toDomKey(e) {
   return key;
 }
 
-/** Build a fresh line container (<p>) holding `text` (or a <br> when empty so it stays
- *  visible/editable, matching zoffice's buildParagraph). */
+// Per-line inline-HTML cache, keyed by the line's plain text, captured when a range is read
+// (yank / delete). A later linewise paste that reinserts that text rebuilds the line from its
+// original HTML — so `yy` + `p` (and `dd` + `p`) preserve font / colour / size instead of
+// dropping to plain text. Bounded FIFO so it can't grow without limit.
+const richLines = new Map(); // text -> { html, className }
+const RICH_MAX = 256;
+function rememberRichLine(text, container) {
+  if (!text || !container) return;
+  richLines.set(text, { html: container.innerHTML, className: container.className || "zo-p" });
+  if (richLines.size > RICH_MAX) richLines.delete(richLines.keys().next().value);
+}
+/** Cache HTML for every line fully covered by [a,b] whose container maps to exactly one line. */
+function cacheRichLines(lines, a, b) {
+  if (b.line - a.line > 200) return; // guard: don't walk huge yanks
+  const counts = new Map();
+  for (const l of lines) counts.set(l.container, (counts.get(l.container) || 0) + 1);
+  const lastLen = lines[b.line] ? lines[b.line].text.length : 0;
+  for (let i = a.line; i <= b.line; i++) {
+    const L = lines[i];
+    if (!L || !L.container) continue;
+    const fullFirst = i > a.line || a.ch === 0;
+    const fullLast = i < b.line || b.ch === lastLen;
+    if (fullFirst && fullLast && counts.get(L.container) === 1) rememberRichLine(L.text, L.container);
+  }
+}
+
+/** Build a fresh line container (<p>) holding `text`. When `text` matches a line captured at
+ *  yank time, rebuild it from that line's original HTML so paste keeps its formatting; otherwise
+ *  a plain line (or a <br> when empty so it stays visible/editable, matching buildParagraph). */
 function buildLineEl(text) {
+  const rich = text ? richLines.get(text) : null;
   const p = document.createElement("p");
-  p.className = "zo-p";
-  if (text) p.textContent = text;
+  p.className = (rich && rich.className) || "zo-p";
+  if (rich) p.innerHTML = rich.html;
+  else if (text) p.textContent = text;
   else p.appendChild(document.createElement("br"));
   return p;
 }
@@ -441,6 +470,9 @@ class DomAdapter {
   getRange(start, end) {
     const [a, b] = sortPos(start, end);
     const { lines } = this.index();
+    // Remember the inline HTML of the covered lines so a later linewise paste of this text can
+    // rebuild it with its original formatting (see buildLineEl / richLines).
+    cacheRichLines(lines, a, b);
     if (a.line === b.line) return (lines[a.line]?.text || "").slice(a.ch, b.ch);
     const out = [(lines[a.line]?.text || "").slice(a.ch)];
     for (let i = a.line + 1; i < b.line; i++) out.push(lines[i]?.text || "");
